@@ -3,7 +3,7 @@
 SimpleEQ is a system-wide graphic EQ for macOS. It captures a loopback device, runs Apple's `AVAudioUnitEQ`, and plays the result on your speakers.
 
 ```
-Apps → loopback → private aggregate (speaker clock) → AVAudioUnitEQ → speakers
+Apps → loopback → private aggregate (loopback clock) → AVAudioUnitEQ → speakers
 ```
 
 ## Requirements

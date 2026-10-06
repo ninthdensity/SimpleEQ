@@ -233,18 +233,22 @@ final class Engine: ObservableObject {
             kAudioAggregateDeviceUIDKey: Self.aggregateUID,
             kAudioAggregateDeviceIsPrivateKey: NSNumber(value: 1),
             kAudioAggregateDeviceIsStackedKey: NSNumber(value: 0),
-            kAudioAggregateDeviceMainSubDeviceKey: speakers.uid,
+            // The loopback is the clock. The aggregate still writes to the loopback's
+            // output stream, and with the loopback drift-corrected those writes slide
+            // against BlackHole's own clock until they blank out what apps play into
+            // it. Drift-correct the speakers instead, as a Multi-Output Device does.
+            kAudioAggregateDeviceMainSubDeviceKey: loopback.uid,
             kAudioAggregateDeviceSubDeviceListKey: [
                 [
                     kAudioSubDeviceUIDKey: speakers.uid,
-                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 0),
+                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 1),
+                    kAudioSubDeviceDriftCompensationQualityKey: NSNumber(value: kAudioAggregateDriftCompensationMediumQuality),
                     kAudioSubDeviceInputChannelsKey: NSNumber(value: 0),
                     kAudioSubDeviceOutputChannelsKey: NSNumber(value: speakers.outputChannels),
                 ],
                 [
                     kAudioSubDeviceUIDKey: loopback.uid,
-                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 1),
-                    kAudioSubDeviceDriftCompensationQualityKey: NSNumber(value: kAudioAggregateDriftCompensationMediumQuality),
+                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 0),
                     kAudioSubDeviceInputChannelsKey: NSNumber(value: loopback.inputChannels),
                     kAudioSubDeviceOutputChannelsKey: NSNumber(value: 0),
                 ],
