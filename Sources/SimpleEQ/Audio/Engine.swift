@@ -32,6 +32,7 @@ final class Engine: ObservableObject {
 
     private(set) var equalizer: Equalizer
     private var audioEngine: AVAudioEngine?
+    private var configObserver: NSObjectProtocol?
     private var aggregateID: AudioDeviceID = 0
     private var previousOutputUID: String?
     private var routeInputUID: String?
@@ -178,13 +179,13 @@ final class Engine: ObservableObject {
     private func buildEngine(on device: AudioDeviceID) throws {
         let engine = AVAudioEngine()
         audioEngine = engine
-        try setDevice(device, on: engine.inputNode)
+        // Input and output nodes share one audio unit on macOS. Setting the device
+        // through both nodes leaves the engine "running" with no I/O, so set it once.
         try setDevice(device, on: engine.outputNode)
 
-        let format = engine.inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw EngineError.badFormat
-        }
+        // AVAudioEngine keeps reporting the default input's format after the device
+        // changes, so read the aggregate's format from the audio unit itself.
+        let format = try deviceInputFormat(of: engine.inputNode)
         sharedRate = format.sampleRate
 
         engine.attach(equalizer.eq)
@@ -192,6 +193,89 @@ final class Engine: ObservableObject {
         engine.connect(equalizer.eq, to: engine.mainMixerNode, format: format)
         engine.prepare()
         try engine.start()
+
+        // Claiming the system output makes macOS send a configuration change, and
+        // AVAudioEngine answers it by moving its I/O to the default device, which is
+        // now the loopback. Point the same engine back at the aggregate when that
+        // happens; building a new engine instead gets moved again, in a loop.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleConfigurationChange() }
+        }
+    }
+
+    private func handleConfigurationChange() {
+        guard state == .running, let engine = audioEngine, aggregateID != 0 else { return }
+        if engine.isRunning, currentDevice(of: engine) == aggregateID { return }
+        engine.stop()
+        do {
+            try setDevice(aggregateID, on: engine.outputNode)
+            try engine.start()
+        } catch {
+            let failure = hardStop()
+            let message = failure ?? error.localizedDescription
+            state = .error(message)
+            statusMessage = message
+        }
+    }
+
+    private func currentDevice(of engine: AVAudioEngine) -> AudioDeviceID? {
+        guard let audioUnit = engine.outputNode.audioUnit else { return nil }
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            &size
+        )
+        return status == noErr ? device : nil
+    }
+
+    private func tearDownEngine() {
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
+        }
+        if let engine = audioEngine {
+            if engine.isRunning { engine.stop() }
+            if engine.attachedNodes.contains(equalizer.eq) {
+                engine.disconnectNodeOutput(equalizer.eq)
+                engine.disconnectNodeInput(equalizer.eq)
+                engine.detach(equalizer.eq)
+            }
+            engine.reset()
+        }
+        audioEngine = nil
+    }
+
+    private func deviceInputFormat(of node: AVAudioInputNode) throws -> AVAudioFormat {
+        guard let audioUnit = node.audioUnit else { throw EngineError.badFormat }
+        var description = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input,
+            1,
+            &description,
+            &size
+        )
+        guard status == noErr,
+              description.mSampleRate > 0,
+              description.mChannelsPerFrame > 0,
+              let format = AVAudioFormat(
+                  standardFormatWithSampleRate: description.mSampleRate,
+                  channels: description.mChannelsPerFrame
+              ) else {
+            throw EngineError.badFormat
+        }
+        return format
     }
 
     private func setDevice(_ id: AudioDeviceID, on node: AVAudioIONode) throws {
@@ -297,16 +381,7 @@ final class Engine: ObservableObject {
     @discardableResult
     private func hardStop() -> String? {
         stopWatching()
-        if let engine = audioEngine {
-            if engine.isRunning { engine.stop() }
-            if engine.attachedNodes.contains(equalizer.eq) {
-                engine.disconnectNodeOutput(equalizer.eq)
-                engine.disconnectNodeInput(equalizer.eq)
-                engine.detach(equalizer.eq)
-            }
-            engine.reset()
-        }
-        audioEngine = nil
+        tearDownEngine()
         if aggregateID != 0 {
             AudioHardwareDestroyAggregateDevice(aggregateID)
             aggregateID = 0
