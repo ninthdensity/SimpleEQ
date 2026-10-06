@@ -45,6 +45,10 @@ final class Engine: ObservableObject {
 
     private static let claimActiveKey = "simpleEQ.outputClaimActive"
     private static let claimOutputUIDKey = "simpleEQ.previousOutputUID"
+    private static let loopbackUIDKey = "simpleEQ.loopbackUID"
+    private static let loopbackVolumeKey = "simpleEQ.loopbackVolume"
+    private static let speakersUIDKey = "simpleEQ.speakersUID"
+    private static let alertOutputUIDKey = "simpleEQ.previousAlertOutputUID"
     private static let aggregateUID = "app.simpleeq.aggregate"
 
     init() {
@@ -103,7 +107,7 @@ final class Engine: ObservableObject {
 
         do {
             if claimSystemOutput {
-                try claimSystemOutputDevice(loopbackID: loopback.id)
+                try claimSystemOutputDevice(loopbackID: loopback.id, speakersID: speakers.id)
             }
             aggregateID = try createAggregate(loopback: loopback, speakers: speakers)
             try buildEngine(on: aggregateID)
@@ -127,7 +131,7 @@ final class Engine: ObservableObject {
         }
     }
 
-    private func claimSystemOutputDevice(loopbackID: AudioDeviceID) throws {
+    private func claimSystemOutputDevice(loopbackID: AudioDeviceID, speakersID: AudioDeviceID) throws {
         if previousOutputUID == nil {
             if let saved = UserDefaults.standard.string(forKey: Self.claimOutputUIDKey) {
                 previousOutputUID = saved
@@ -143,6 +147,62 @@ final class Engine: ObservableObject {
             }
         }
         try AudioDevices.setDefaultOutput(loopbackID)
+        handVolumeToLoopback(loopbackID: loopbackID, speakersID: speakersID)
+    }
+
+    // The volume keys now drive the loopback, and BlackHole attenuates its signal by
+    // its volume. Move the speakers' level onto the loopback and run the speakers at
+    // 0 dB, so the keys keep working and the loudness does not jump.
+    private func handVolumeToLoopback(loopbackID: AudioDeviceID, speakersID: AudioDeviceID) {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Self.loopbackVolumeKey) == nil,
+           let loopbackUID = AudioDevices.info(id: loopbackID)?.uid,
+           let speakersUID = AudioDevices.info(id: speakersID)?.uid,
+           let volume = AudioDevices.outputDecibels(loopbackID) {
+            defaults.set(loopbackUID, forKey: Self.loopbackUIDKey)
+            defaults.set(speakersUID, forKey: Self.speakersUIDKey)
+            defaults.set(volume, forKey: Self.loopbackVolumeKey)
+        }
+        // Alert sounds use their own output. Left on the speakers, they would play at
+        // 0 dB, so route them through the loopback too.
+        if defaults.string(forKey: Self.alertOutputUIDKey) == nil,
+           let alertUID = AudioDevices.defaultAlertOutputID().flatMap({ AudioDevices.info(id: $0)?.uid }) {
+            defaults.set(alertUID, forKey: Self.alertOutputUIDKey)
+        }
+        AudioDevices.setDefaultAlertOutput(loopbackID)
+
+        guard let speakersLevel = AudioDevices.outputDecibels(speakersID) else {
+            AudioDevices.setOutputDecibels(0, on: loopbackID)
+            return
+        }
+        AudioDevices.setOutputDecibels(speakersLevel, on: loopbackID)
+        AudioDevices.setOutputDecibels(0, on: speakersID)
+    }
+
+    // Put alert sounds back, give the speakers the level the user last set on the
+    // loopback, then put the loopback back where it was.
+    private static func restoreVolumes() {
+        let defaults = UserDefaults.standard
+        defer {
+            defaults.removeObject(forKey: loopbackUIDKey)
+            defaults.removeObject(forKey: speakersUIDKey)
+            defaults.removeObject(forKey: loopbackVolumeKey)
+            defaults.removeObject(forKey: alertOutputUIDKey)
+        }
+        let devices = AudioDevices.list()
+        if let alertUID = defaults.string(forKey: alertOutputUIDKey),
+           let alert = devices.first(where: { $0.uid == alertUID }) {
+            AudioDevices.setDefaultAlertOutput(alert.id)
+        }
+        guard let loopbackUID = defaults.string(forKey: loopbackUIDKey),
+              defaults.object(forKey: loopbackVolumeKey) != nil else { return }
+        guard let loopback = devices.first(where: { $0.uid == loopbackUID }) else { return }
+        if let speakersUID = defaults.string(forKey: speakersUIDKey),
+           let speakers = devices.first(where: { $0.uid == speakersUID }),
+           let level = AudioDevices.outputDecibels(loopback.id) {
+            AudioDevices.setOutputDecibels(level, on: speakers.id)
+        }
+        AudioDevices.setOutputDecibels(defaults.float(forKey: loopbackVolumeKey), on: loopback.id)
     }
 
     private func createAggregate(loopback: AudioDeviceInfo, speakers: AudioDeviceInfo) throws -> AudioDeviceID {
@@ -413,6 +473,7 @@ final class Engine: ObservableObject {
     }
 
     private static func clearClaim() {
+        restoreVolumes()
         UserDefaults.standard.set(false, forKey: claimActiveKey)
         UserDefaults.standard.removeObject(forKey: claimOutputUIDKey)
     }

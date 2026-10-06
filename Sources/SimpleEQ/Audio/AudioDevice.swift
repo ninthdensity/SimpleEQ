@@ -53,6 +53,14 @@ enum AudioDevices {
         deviceID(for: kAudioHardwarePropertyDefaultOutputDevice)
     }
 
+    static func defaultAlertOutputID() -> AudioDeviceID? {
+        deviceID(for: kAudioHardwarePropertyDefaultSystemOutputDevice)
+    }
+
+    static func setDefaultAlertOutput(_ id: AudioDeviceID) {
+        try? setDeviceID(id, for: kAudioHardwarePropertyDefaultSystemOutputDevice)
+    }
+
     static func setDefaultOutput(_ id: AudioDeviceID) throws {
         if let info = info(for: id), !info.hasOutput {
             throw AudioDeviceError.propertyFailed(
@@ -66,6 +74,28 @@ enum AudioDevices {
                 "macOS refused to make “\(name)” the system output. Use BlackHole 2ch."
             )
         }
+    }
+
+    static func outputDecibels(_ id: AudioDeviceID) -> Float32? {
+        var address = volumeAddress
+        var decibels: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &decibels) == noErr else { return nil }
+        return decibels
+    }
+
+    static func setOutputDecibels(_ decibels: Float32, on id: AudioDeviceID) {
+        var address = volumeAddress
+        var value = decibels
+        AudioObjectSetPropertyData(id, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+    }
+
+    private static var volumeAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeDecibels,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
     }
 
     static func preferredLoopback() -> AudioDeviceInfo? {

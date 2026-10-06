@@ -35,7 +35,7 @@ The script runs `swift build`, wraps the binary in `build/SimpleEQ.app`, and sig
 4. Leave **Claim system output** on.
 5. Click **Start**. Audio from other apps plays through the EQ.
 
-**Claim system output** sets the system default output to the loopback device while SimpleEQ is running. Stop and Quit put the previous output back. If the app quits without restoring it, the next launch tries again. If the loopback or the speakers disappear while EQ is running, SimpleEQ stops and restores that output.
+**Claim system output** sets the system default output and the alert-sound output to the loopback device while SimpleEQ is running. It also moves your speakers' volume onto the loopback and runs the speakers at full, so the volume keys keep working and the loudness stays the same. Stop and Quit put the previous outputs and volumes back. If the app quits without restoring it, the next launch tries again. If the loopback or the speakers disappear while EQ is running, SimpleEQ stops and restores that output.
 
 Turn **Claim system output** off when you route audio into the loopback yourself. Do not use a Multi-Output Device that contains both your speakers and the loopback. You would hear the dry signal and the equalized signal together. If that Multi-Output Device is also SimpleEQ's output, the signal can loop.
 
