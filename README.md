@@ -13,8 +13,10 @@ Apps → loopback → private aggregate (speaker clock) → AVAudioUnitEQ → sp
 - A loopback driver for system-wide EQ. [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) is the one this app looks for first.
 
 ```bash
-brew install blackhole-2ch
+brew install blackhole-2ch && sudo killall coreaudiod
 ```
+
+The second command restarts Core Audio so macOS sees the new device. If BlackHole is missing, SimpleEQ shows this command with a Copy button.
 
 ## Build
 

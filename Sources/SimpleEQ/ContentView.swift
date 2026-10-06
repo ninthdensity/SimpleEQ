@@ -22,6 +22,8 @@ struct ContentView: View {
 
     private var isRunning: Bool { model.engine.state == .running }
 
+    private static let blackHoleInstallCommand = "brew install blackhole-2ch && sudo killall coreaudiod"
+
     var body: some View {
         ZStack {
             AppCanvas()
@@ -161,14 +163,17 @@ struct ContentView: View {
                 .tint(theme.accent)
 
                 if model.inputs.contains(where: \.isSystemLoopback) == false {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(theme.accentWarm)
-                            .font(.system(size: 12))
-                        Text("No BlackHole found. Install with brew install blackhole-2ch, then sudo killall coreaudiod")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(theme.accentWarm)
+                                .font(.system(size: 12))
+                            Text("No BlackHole found. Paste this into Terminal, then click Refresh.")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        CopyableCommand(command: Self.blackHoleInstallCommand)
                     }
                     .padding(10)
                     .background(theme.accentWarm.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous))
@@ -394,6 +399,46 @@ struct ContentView: View {
                     NSApp.terminate(nil)
                 }
             }
+        }
+    }
+}
+
+private struct CopyableCommand: View {
+    let command: String
+    @Environment(\.theme) private var theme
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(command)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(theme.textPrimary)
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(theme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(theme.elevatedFill, in: Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Copy the install command")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(theme.trackFill, in: RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                .strokeBorder(theme.panelStroke, lineWidth: 1)
         }
     }
 }
