@@ -33,6 +33,8 @@ final class Engine: ObservableObject {
     private(set) var equalizer: Equalizer
     private var audioEngine: AVAudioEngine?
     private var configObserver: NSObjectProtocol?
+    private var fadeIn: Task<Void, Never>?
+    private var speakersToRaise: AudioDeviceID?
     private var aggregateID: AudioDeviceID = 0
     private var previousOutputUID: String?
     private var routeInputUID: String?
@@ -119,6 +121,26 @@ final class Engine: ObservableObject {
 
         state = .running
         statusMessage = "Running · \(Int(sharedRate)) Hz"
+        scheduleFadeIn()
+    }
+
+    // Apps take a moment to follow the new default output. Raising the speakers to
+    // 0 dB before they move would play them at full volume, so wait, raise the
+    // speakers, then fade the EQ in.
+    private func scheduleFadeIn() {
+        fadeIn = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self, !Task.isCancelled, self.state == .running, let engine = self.audioEngine else { return }
+            if let speakers = self.speakersToRaise {
+                AudioDevices.setOutputDecibels(0, on: speakers)
+                self.speakersToRaise = nil
+            }
+            for step in 1...12 {
+                try? await Task.sleep(nanoseconds: 25_000_000)
+                guard !Task.isCancelled else { return }
+                engine.mainMixerNode.outputVolume = Float(step) / 12
+            }
+        }
     }
 
     func stop() {
@@ -146,13 +168,13 @@ final class Engine: ObservableObject {
                 UserDefaults.standard.set(true, forKey: Self.claimActiveKey)
             }
         }
-        try AudioDevices.setDefaultOutput(loopbackID)
         handVolumeToLoopback(loopbackID: loopbackID, speakersID: speakersID)
+        try AudioDevices.setDefaultOutput(loopbackID)
     }
 
     // The volume keys now drive the loopback, and BlackHole attenuates its signal by
-    // its volume. Move the speakers' level onto the loopback and run the speakers at
-    // 0 dB, so the keys keep working and the loudness does not jump.
+    // its volume. Move the speakers' level onto the loopback, and once the route is
+    // up run the speakers at 0 dB, so the keys keep working at the same loudness.
     private func handVolumeToLoopback(loopbackID: AudioDeviceID, speakersID: AudioDeviceID) {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: Self.loopbackVolumeKey) == nil,
@@ -176,7 +198,7 @@ final class Engine: ObservableObject {
             return
         }
         AudioDevices.setOutputDecibels(speakersLevel, on: loopbackID)
-        AudioDevices.setOutputDecibels(0, on: speakersID)
+        speakersToRaise = speakersID
     }
 
     // Put alert sounds back, give the speakers the level the user last set on the
@@ -251,6 +273,7 @@ final class Engine: ObservableObject {
         engine.attach(equalizer.eq)
         engine.connect(engine.inputNode, to: equalizer.eq, format: format)
         engine.connect(equalizer.eq, to: engine.mainMixerNode, format: format)
+        engine.mainMixerNode.outputVolume = 0
         engine.prepare()
         try engine.start()
 
@@ -441,6 +464,9 @@ final class Engine: ObservableObject {
     @discardableResult
     private func hardStop() -> String? {
         stopWatching()
+        fadeIn?.cancel()
+        fadeIn = nil
+        speakersToRaise = nil
         tearDownEngine()
         if aggregateID != 0 {
             AudioHardwareDestroyAggregateDevice(aggregateID)
@@ -462,6 +488,8 @@ final class Engine: ObservableObject {
         guard let device = AudioDevices.list().first(where: { $0.uid == uid && $0.hasOutput }) else {
             return "Could not restore the previous system output."
         }
+        // Bring the speakers down before apps move back to them.
+        Self.restoreVolumes()
         do {
             try AudioDevices.setDefaultOutput(device.id)
         } catch {
