@@ -30,16 +30,21 @@ final class Engine: ObservableObject {
     @Published private(set) var state: State = .stopped
     @Published private(set) var statusMessage: String = "Stopped"
 
-    private var captureEngine: AVAudioEngine?
-    private var playback: PlaybackUnit?
     private(set) var equalizer: Equalizer
-    private let ring = CircularBuffer(capacityFrames: 16384, primeFrames: 2048)
-    private var tapInstalled = false
+    private var audioEngine: AVAudioEngine?
+    private var aggregateID: AudioDeviceID = 0
     private var previousOutputUID: String?
+    private var routeInputUID: String?
+    private var routeOutputUID: String?
+    private var aliveBlock: AudioObjectPropertyListenerBlock?
+    private var watchedDevices: [AudioDeviceID] = []
+    private var watchingDeviceList = false
+    private var handlingLoss = false
     private var sharedRate: Double = 48_000
 
     private static let claimActiveKey = "simpleEQ.outputClaimActive"
     private static let claimOutputUIDKey = "simpleEQ.previousOutputUID"
+    private static let aggregateUID = "app.simpleeq.aggregate"
 
     init() {
         equalizer = Equalizer(frequencies: BandCount.ten.frequencies)
@@ -85,12 +90,23 @@ final class Engine: ObservableObject {
     func start(inputID: AudioDeviceID, outputID: AudioDeviceID, claimSystemOutput: Bool = true) throws {
         _ = hardStop()
 
+        guard let loopback = AudioDevices.info(id: inputID), loopback.inputChannels > 0 else {
+            throw EngineError.badFormat
+        }
+        guard let speakers = AudioDevices.info(id: outputID), speakers.outputChannels > 0 else {
+            throw EngineError.startFailed("The output device has no channels.")
+        }
+
+        routeInputUID = loopback.uid
+        routeOutputUID = speakers.uid
+
         do {
             if claimSystemOutput {
-                try claimSystemOutputDevice(loopbackID: inputID)
+                try claimSystemOutputDevice(loopbackID: loopback.id)
             }
-            try buildCapture(loopbackID: inputID)
-            try buildPlayback(speakersID: outputID)
+            aggregateID = try createAggregate(loopback: loopback, speakers: speakers)
+            try buildEngine(on: aggregateID)
+            startWatching(loopback: loopback.id, speakers: speakers.id)
         } catch {
             _ = hardStop()
             throw error
@@ -128,15 +144,59 @@ final class Engine: ObservableObject {
         try AudioDevices.setDefaultOutput(loopbackID)
     }
 
-    private func buildCapture(loopbackID: AudioDeviceID) throws {
-        ring.reset()
+    private func createAggregate(loopback: AudioDeviceInfo, speakers: AudioDeviceInfo) throws -> AudioDeviceID {
+        let description: NSDictionary = [
+            kAudioAggregateDeviceNameKey: "SimpleEQ",
+            kAudioAggregateDeviceUIDKey: Self.aggregateUID,
+            kAudioAggregateDeviceIsPrivateKey: NSNumber(value: 1),
+            kAudioAggregateDeviceIsStackedKey: NSNumber(value: 0),
+            kAudioAggregateDeviceMainSubDeviceKey: speakers.uid,
+            kAudioAggregateDeviceSubDeviceListKey: [
+                [
+                    kAudioSubDeviceUIDKey: speakers.uid,
+                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 0),
+                    kAudioSubDeviceInputChannelsKey: NSNumber(value: 0),
+                    kAudioSubDeviceOutputChannelsKey: NSNumber(value: speakers.outputChannels),
+                ],
+                [
+                    kAudioSubDeviceUIDKey: loopback.uid,
+                    kAudioSubDeviceDriftCompensationKey: NSNumber(value: 1),
+                    kAudioSubDeviceDriftCompensationQualityKey: NSNumber(value: kAudioAggregateDriftCompensationMediumQuality),
+                    kAudioSubDeviceInputChannelsKey: NSNumber(value: loopback.inputChannels),
+                    kAudioSubDeviceOutputChannelsKey: NSNumber(value: 0),
+                ],
+            ],
+        ]
+        var aggregate = AudioObjectID(0)
+        let status = AudioHardwareCreateAggregateDevice(description, &aggregate)
+        guard status == noErr, aggregate != 0 else {
+            throw EngineError.startFailed("Could not build the audio route (\(AudioDevices.statusString(status))).")
+        }
+        return aggregate
+    }
 
-        let capture = AVAudioEngine()
-        captureEngine = capture
+    private func buildEngine(on device: AudioDeviceID) throws {
+        let engine = AVAudioEngine()
+        audioEngine = engine
+        try setDevice(device, on: engine.inputNode)
+        try setDevice(device, on: engine.outputNode)
 
-        let input = capture.inputNode
-        guard let audioUnit = input.audioUnit else { throw EngineError.badFormat }
-        var device = loopbackID
+        let format = engine.inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw EngineError.badFormat
+        }
+        sharedRate = format.sampleRate
+
+        engine.attach(equalizer.eq)
+        engine.connect(engine.inputNode, to: equalizer.eq, format: format)
+        engine.connect(equalizer.eq, to: engine.mainMixerNode, format: format)
+        engine.prepare()
+        try engine.start()
+    }
+
+    private func setDevice(_ id: AudioDeviceID, on node: AVAudioIONode) throws {
+        guard let audioUnit = node.audioUnit else { throw EngineError.badFormat }
+        var device = id
         let status = AudioUnitSetProperty(
             audioUnit,
             kAudioOutputUnitProperty_CurrentDevice,
@@ -146,59 +206,113 @@ final class Engine: ObservableObject {
             UInt32(MemoryLayout<AudioDeviceID>.size)
         )
         guard status == noErr else {
-            throw EngineError.startFailed("Could not open the input device (\(AudioDevices.statusString(status))).")
+            throw EngineError.startFailed("Could not open the audio route (\(AudioDevices.statusString(status))).")
         }
-
-        let format = input.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw EngineError.badFormat
-        }
-        sharedRate = format.sampleRate
-
-        capture.attach(equalizer.eq)
-        capture.connect(capture.inputNode, to: equalizer.eq, format: format)
-        capture.connect(equalizer.eq, to: capture.mainMixerNode, format: format)
-        capture.mainMixerNode.outputVolume = 0
-
-        let channels = Int(format.channelCount)
-        equalizer.eq.installTap(onBus: 0, bufferSize: 512, format: format) { [ring] buffer, _ in
-            guard let data = buffer.floatChannelData else { return }
-            let frames = Int(buffer.frameLength)
-            let left = UnsafePointer(data[0])
-            let right = channels > 1 ? UnsafePointer(data[1]) : left
-            ring.write(left: left, right: right, frameCount: frames)
-        }
-        tapInstalled = true
-
-        capture.prepare()
-        try capture.start()
     }
 
-    private func buildPlayback(speakersID: AudioDeviceID) throws {
-        let unit = PlaybackUnit(ring: ring)
-        try unit.start(deviceID: speakersID, sampleRate: sharedRate)
-        playback = unit
+    private func startWatching(loopback: AudioDeviceID, speakers: AudioDeviceID) {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor in
+                self?.handleDeviceLoss()
+            }
+        }
+        aliveBlock = block
+
+        var alive = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        for id in [loopback, speakers] {
+            if AudioObjectAddPropertyListenerBlock(id, &alive, .main, block) == noErr {
+                watchedDevices.append(id)
+            }
+        }
+
+        var devices = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &devices, .main, block) == noErr {
+            watchingDeviceList = true
+        }
+    }
+
+    private func stopWatching() {
+        guard let block = aliveBlock else { return }
+        var alive = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        for id in watchedDevices {
+            AudioObjectRemovePropertyListenerBlock(id, &alive, .main, block)
+        }
+        watchedDevices.removeAll()
+
+        if watchingDeviceList {
+            var devices = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDevices,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &devices, .main, block)
+            watchingDeviceList = false
+        }
+        aliveBlock = nil
+    }
+
+    private func handleDeviceLoss() {
+        guard state == .running, !handlingLoss else { return }
+        guard routeMissing() else { return }
+        handlingLoss = true
+        defer { handlingLoss = false }
+        let failure = hardStop()
+        let message = failure ?? "An audio device disconnected. System output was restored."
+        state = .error(message)
+        statusMessage = message
+    }
+
+    private func routeMissing() -> Bool {
+        let devices = AudioDevices.list()
+        guard let inputUID = routeInputUID, let outputUID = routeOutputUID else { return true }
+        guard let input = devices.first(where: { $0.uid == inputUID }),
+              let output = devices.first(where: { $0.uid == outputUID }) else { return true }
+        return !isAlive(input.id) || !isAlive(output.id)
+    }
+
+    private func isAlive(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var alive: UInt32 = 1
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &alive) == noErr else { return false }
+        return alive != 0
     }
 
     @discardableResult
     private func hardStop() -> String? {
-        if tapInstalled {
-            equalizer.eq.removeTap(onBus: 0)
-            tapInstalled = false
-        }
-        if let capture = captureEngine {
-            if capture.isRunning { capture.stop() }
-            if capture.attachedNodes.contains(equalizer.eq) {
-                capture.disconnectNodeOutput(equalizer.eq)
-                capture.disconnectNodeInput(equalizer.eq)
-                capture.detach(equalizer.eq)
+        stopWatching()
+        if let engine = audioEngine {
+            if engine.isRunning { engine.stop() }
+            if engine.attachedNodes.contains(equalizer.eq) {
+                engine.disconnectNodeOutput(equalizer.eq)
+                engine.disconnectNodeInput(equalizer.eq)
+                engine.detach(equalizer.eq)
             }
-            capture.reset()
+            engine.reset()
         }
-        captureEngine = nil
-        playback?.stop()
-        playback = nil
-        ring.reset()
+        audioEngine = nil
+        if aggregateID != 0 {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = 0
+        }
+        routeInputUID = nil
+        routeOutputUID = nil
         return restoreSavedOutput()
     }
 

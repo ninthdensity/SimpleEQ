@@ -10,9 +10,7 @@
 		1225CBCF945943CB353FEA6A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F9787760040DB1F4DCA4647 /* AppModel.swift */; };
 		33B97995462AC7ED8652BF21 /* SimpleEQApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03C6B12AB24EC06B24402560 /* SimpleEQApp.swift */; };
 		4102BA8207BD5E7379B633DF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 09D47B16DE6138CE94E69199 /* Assets.xcassets */; };
-		42169B7D982D027ADC9B7E9A /* PlaybackUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223072DBE3D80403265A5B92 /* PlaybackUnit.swift */; };
 		91F48116829FAB1F15983C5A /* AudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95D0E5025A87E138F233A4AC /* AudioDevice.swift */; };
-		A6367E953571A265D7F1626E /* CircularBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC80E8A8B7F76FF54A2B0FA /* CircularBuffer.swift */; };
 		AAAE18993B8A50CC7DB3539C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A1ECA37AA5C20B55B9C739 /* Theme.swift */; };
 		D42A79D7AC5C6C0AA5128EF5 /* Equalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54025425B1035E6A83212CB /* Equalizer.swift */; };
 		FCC2D9054C337065782EC610 /* Engine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2F27BAF18A51D26337F288 /* Engine.swift */; };
@@ -23,8 +21,6 @@
 		03C6B12AB24EC06B24402560 /* SimpleEQApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleEQApp.swift; sourceTree = "<group>"; };
 		09D47B16DE6138CE94E69199 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		17C00BBAF7E3C63009D60382 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		1DC80E8A8B7F76FF54A2B0FA /* CircularBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularBuffer.swift; sourceTree = "<group>"; };
-		223072DBE3D80403265A5B92 /* PlaybackUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackUnit.swift; sourceTree = "<group>"; };
 		2D2F27BAF18A51D26337F288 /* Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Engine.swift; sourceTree = "<group>"; };
 		3F9787760040DB1F4DCA4647 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		528882034A9C2F799E05C40A /* SimpleEQ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimpleEQ.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -40,10 +36,8 @@
 			isa = PBXGroup;
 			children = (
 				95D0E5025A87E138F233A4AC /* AudioDevice.swift */,
-				1DC80E8A8B7F76FF54A2B0FA /* CircularBuffer.swift */,
 				2D2F27BAF18A51D26337F288 /* Engine.swift */,
 				A54025425B1035E6A83212CB /* Equalizer.swift */,
-				223072DBE3D80403265A5B92 /* PlaybackUnit.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -151,11 +145,9 @@
 			files = (
 				1225CBCF945943CB353FEA6A /* AppModel.swift in Sources */,
 				91F48116829FAB1F15983C5A /* AudioDevice.swift in Sources */,
-				A6367E953571A265D7F1626E /* CircularBuffer.swift in Sources */,
 				FEB092D318E5E7EEA4813F96 /* ContentView.swift in Sources */,
 				FCC2D9054C337065782EC610 /* Engine.swift in Sources */,
 				D42A79D7AC5C6C0AA5128EF5 /* Equalizer.swift in Sources */,
-				42169B7D982D027ADC9B7E9A /* PlaybackUnit.swift in Sources */,
 				33B97995462AC7ED8652BF21 /* SimpleEQApp.swift in Sources */,
 				AAAE18993B8A50CC7DB3539C /* Theme.swift in Sources */,
 			);

@@ -5,8 +5,11 @@ struct AudioDeviceInfo: Identifiable, Hashable, Sendable {
     let id: AudioDeviceID
     let name: String
     let uid: String
-    let hasInput: Bool
-    let hasOutput: Bool
+    let inputChannels: Int
+    let outputChannels: Int
+
+    var hasInput: Bool { inputChannels > 0 }
+    var hasOutput: Bool { outputChannels > 0 }
 
     var isSystemLoopback: Bool {
         let hay = (name + " " + uid).lowercased()
@@ -109,7 +112,7 @@ enum AudioDevices {
               let uid = stringProperty(id, kAudioDevicePropertyDeviceUID) else { return nil }
         let inCh = channelCount(id, scope: kAudioObjectPropertyScopeInput)
         let outCh = channelCount(id, scope: kAudioObjectPropertyScopeOutput)
-        return AudioDeviceInfo(id: id, name: name, uid: uid, hasInput: inCh > 0, hasOutput: outCh > 0)
+        return AudioDeviceInfo(id: id, name: name, uid: uid, inputChannels: inCh, outputChannels: outCh)
     }
 
     private static func channelCount(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
