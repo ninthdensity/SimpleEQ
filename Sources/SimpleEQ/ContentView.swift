@@ -7,6 +7,9 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @AppStorage("simpleEQ.appStyle") private var styleRaw: String = AppStyle.glass.rawValue
 
+    @State private var showingSavePreset = false
+    @State private var newPresetName = ""
+
     var appDelegate: AppDelegate?
     var showsOpenWindowButton: Bool = false
 
@@ -250,6 +253,68 @@ struct ContentView: View {
         return devices.first(where: { $0.id == id })?.name
     }
 
+    private var presetMenu: some View {
+        Menu {
+            ForEach(model.presets) { preset in
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        model.applyPreset(preset)
+                    }
+                } label: {
+                    if model.currentPresetName == preset.name {
+                        Label(preset.name, systemImage: "checkmark")
+                    } else {
+                        Text(preset.name)
+                    }
+                }
+            }
+            if !model.presets.isEmpty {
+                Divider()
+            }
+            Button("Save Preset…") {
+                newPresetName = model.currentPresetName ?? ""
+                showingSavePreset = true
+            }
+            if !model.presets.isEmpty {
+                Menu("Delete") {
+                    ForEach(model.presets) { preset in
+                        Button(preset.name, role: .destructive) { model.deletePreset(preset) }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(model.currentPresetName ?? "Presets")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .foregroundStyle(theme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(theme.elevatedFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.panelStroke, lineWidth: 1)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .alert("Save Preset", isPresented: $showingSavePreset) {
+            TextField("Name", text: $newPresetName)
+            Button("Save") { model.savePreset(named: newPresetName) }
+                .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saves the band count, every slider, and the preamp. Using an existing name replaces it.")
+        }
+    }
+
     private var eqPanel: some View {
         StylePanel {
             VStack(alignment: .leading, spacing: 16) {
@@ -292,6 +357,8 @@ struct ContentView: View {
                     }
 
                     Spacer()
+
+                    presetMenu
 
                     PillButton(title: "Flat", icon: "minus.slash.plus", kind: .secondary) {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {

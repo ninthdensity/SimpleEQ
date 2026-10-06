@@ -11,7 +11,7 @@ final class Engine: ObservableObject {
         case error(String)
     }
 
-    enum BandCount: String, CaseIterable, Identifiable {
+    enum BandCount: String, CaseIterable, Identifiable, Codable {
         case eight = "8"
         case ten = "10"
         case sixteen = "16"

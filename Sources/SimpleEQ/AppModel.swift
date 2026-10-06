@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     @Published var globalGain: Float = 0
     @Published var eqEnabled: Bool = true
     @Published var claimSystemOutput: Bool = true
+    @Published private(set) var presets: [EQPreset] = PresetStore.load()
+    @Published private(set) var currentPresetName: String?
 
     @Published var errorMessage: String?
 
@@ -89,6 +91,7 @@ final class AppModel: ObservableObject {
     }
 
     func applyBandCount(_ count: Engine.BandCount) {
+        currentPresetName = nil
         bandCount = count
         engine.equalizer.apply(count.frequencies)
         gains = Array(repeating: 0, count: count.frequencies.count)
@@ -98,11 +101,13 @@ final class AppModel: ObservableObject {
 
     func setGain(_ value: Float, at index: Int) {
         guard gains.indices.contains(index) else { return }
+        currentPresetName = nil
         gains[index] = value
         engine.equalizer.setGain(value, at: index)
     }
 
     func setGlobalGain(_ value: Float) {
+        currentPresetName = nil
         globalGain = value
         engine.equalizer.globalGain = value
     }
@@ -113,9 +118,43 @@ final class AppModel: ObservableObject {
     }
 
     func flat() {
+        currentPresetName = nil
         gains = Array(repeating: 0, count: frequencies.count)
         globalGain = 0
         engine.equalizer.flat()
+    }
+
+    /// Saves the current curve. A preset with the same name is replaced.
+    func savePreset(named rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let preset = EQPreset(name: name, bandCount: bandCount, gains: gains, preamp: globalGain)
+        if let index = presets.firstIndex(where: { $0.name == name }) {
+            presets[index] = preset
+        } else {
+            presets.append(preset)
+        }
+        PresetStore.save(presets)
+        currentPresetName = name
+    }
+
+    func applyPreset(_ preset: EQPreset) {
+        if preset.bandCount != bandCount {
+            applyBandCount(preset.bandCount)
+        }
+        for (index, gain) in preset.gains.enumerated() {
+            setGain(gain, at: index)
+        }
+        setGlobalGain(preset.preamp)
+        currentPresetName = preset.name
+    }
+
+    func deletePreset(_ preset: EQPreset) {
+        presets.removeAll { $0.name == preset.name }
+        PresetStore.save(presets)
+        if currentPresetName == preset.name {
+            currentPresetName = nil
+        }
     }
 
     func toggleRunning() {
