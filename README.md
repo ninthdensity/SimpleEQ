@@ -9,7 +9,7 @@ Apps → loopback → private aggregate (speaker clock) → AVAudioUnitEQ → sp
 ## Requirements
 
 - macOS 13 or later
-- Xcode 16 or later
+- Swift 5.9 or later. Apple's Command Line Tools are enough (`xcode-select --install`); Xcode is not needed.
 - A loopback driver for system-wide EQ. [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) is the one this app looks for first.
 
 ```bash
@@ -18,15 +18,12 @@ brew install blackhole-2ch
 
 ## Build
 
-Open `SimpleEQ.xcodeproj` and run the SimpleEQ scheme.
-
-From the command line:
-
 ```bash
-xcodebuild -project SimpleEQ.xcodeproj -scheme SimpleEQ -configuration Debug build
+./Scripts/build-app.sh
+open build/SimpleEQ.app
 ```
 
-The project signs ad hoc, so a clone builds without an Apple Developer team. `project.yml` is the XcodeGen spec. Regenerate the project with `xcodegen generate` only after you edit that file.
+The script runs `swift build`, wraps the binary in `build/SimpleEQ.app`, and signs it ad hoc with the hardened runtime and the audio-input entitlement, so a clone builds without an Apple Developer team. Set `SIGN_IDENTITY` to sign with a Developer ID, or `CONFIGURATION=debug` for a debug build.
 
 ## Use it
 
@@ -45,7 +42,13 @@ SimpleEQ asks for microphone access because reading the loopback device is an au
 ## Layout
 
 ```
-SimpleEQ/
+Package.swift
+Resources/
+├── Info.plist
+└── SimpleEQ.entitlements
+Scripts/
+└── build-app.sh
+Sources/SimpleEQ/
 ├── Audio/
 │   ├── AudioDevice.swift
 │   ├── Engine.swift
@@ -53,9 +56,7 @@ SimpleEQ/
 ├── AppModel.swift
 ├── ContentView.swift
 ├── SimpleEQApp.swift
-├── Theme.swift
-├── Info.plist
-└── SimpleEQ.entitlements
+└── Theme.swift
 ```
 
 ## Left out on purpose
